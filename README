@@ -1,1 +1,12 @@
 Test on the PSvita game "Ciel Nosurge" and it works
+Only supports DXT1 (UBC1) and DXT5 (UBC3)
+
+Usage:
+GT2textureConverter input.gtx output.dds
+GT2textureConverter input.dds output.gtx
+
+
+
+
+ZIG version:
+https://github.com/shimamura-sakura/zig-gtx2dds

@@ -1,10 +1,16 @@
-#ifndef Vita_Swizzle
-#define Vita_Swizzle
+// SPDX-FileCopyrightText: 2024, 2026 Nebulas Astra <https://github.com/nebulas-star>
+// SPDX-License-Identifier: MIT
 
-// Unswizzle
-// Code by Committee of Zero
-//https://github.com/CommitteeOfZero/impacto
+#ifndef __Vita_Swizzle__
+#define __Vita_Swizzle__
 
+
+/****** Unswizzle ******/
+
+// SPDX-SnippetBegin
+// SPDX-SnippetCopyrightText: 2018-2024 Committee of Zero <https://github.com/CommitteeOfZero>
+// SPDX-License-Identifier: ISC
+// source: https://github.com/CommitteeOfZero/impacto/src/texture/gxtloader.cpp
 inline int Uint32Log2(uint32_t v) {
     unsigned int const b[] = {0x2, 0xC, 0xF0, 0xFF00, 0xFFFF0000};
     unsigned int const S[] = {1, 2, 4, 8, 16};
@@ -50,9 +56,9 @@ void VitaUnswizzle(int *x, int *y, int width, int height) {
         *y = j / width;
     }
 }
+// SPDX-SnippetEnd
 
-// Swizzle
-// Code by nebulas
+/****** Swizzle ******/
 
 uint32_t BreakByte(uint32_t x) {                    // x = ---- ---- ---- ---- fedc ba98 7654 3210
     x = ((x & 0x0000FF00) << 8) ^ (x & 0x000000FF); // x = ---- ---- fedc ba98 ---- ---- 7654 3210
@@ -85,4 +91,4 @@ void VitaSwizzle(int *x, int *y, int width, int height) {
 }
 
 
-#endif // Vita_Swizzle
+#endif // __Vita_Swizzle__

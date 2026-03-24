@@ -30,9 +30,9 @@ void fwrite32LE(uint32_t FourChar, FILE *out_file)
     fwrite(SingleChar, 1, 4, out_file);
 }
 
-void DDS_to_GTX(char *argv)
+void DDS_to_GTX(char *input, char *output)
 {
-    FILE *DDSfile = fopen_or_exit(argv, "rb");
+    FILE *DDSfile = fopen_or_exit(input, "rb");
     uint32_t headerSize = 0x80;
     uint8_t DDShead[0x80];
     fread(DDShead, 1, headerSize, DDSfile);
@@ -41,53 +41,43 @@ void DDS_to_GTX(char *argv)
     uint32_t textureHeight = ((DDShead[0x0F] << 24) | (DDShead[0x0E] << 16) | (DDShead[0x0D] << 8) | DDShead[0x0C]);
 
     float bytePerPixel;
+    char dwFourCC[4];
+    memcpy(dwFourCC, (DDShead + 0x54), 4);
     char vitaFourCC[4];
-    if (DDShead[0x54] == 'D' && DDShead[0x55] == 'X' && DDShead[0x56] == 'T' && DDShead[0x57] == '1')
-    {
+    if        (!memcmp(dwFourCC, "DXT1", 4)){
         bytePerPixel = 0.5;
         memcpy(vitaFourCC, "UBC1", 4);
-    }
-    else if (DDShead[0x54] == 'D' && DDShead[0x55] == 'X' && DDShead[0x56] == 'T' && DDShead[0x57] == '5')
-    {
+    } else if (!memcmp(dwFourCC, "DXT5", 4)){
         bytePerPixel = 1;
         memcpy(vitaFourCC, "UBC3", 4);
-    }
-    else
-    {
+    } else {
         printf("Error: Unsupported DDS Texture Format:%c%c%c%c.", DDShead[0x54], DDShead[0x55], DDShead[0x56], DDShead[0x57]);
         exit(-1);
     }
 
     uint8_t *textureData = (uint8_t *)malloc((textureWidth * textureHeight * bytePerPixel));
-
     fseek(DDSfile, headerSize, SEEK_SET);
     fread(textureData, 1, textureWidth * textureHeight * bytePerPixel, DDSfile);
     fclose(DDSfile);
 
-    uint8_t *textureOutput = (uint8_t *)malloc((textureWidth * textureHeight * bytePerPixel));
-    SwizzleCtrl(textureWidth, textureHeight, bytePerPixel, textureData, textureOutput, 0);
+    FILE *outputTextureFile = fopen_or_exit(output, "wb");
 
-    char outputTextureFileName[0x80];
-    int cpylen = strcspn(argv, ".");
-    memcpy(outputTextureFileName, argv, cpylen);
-    memcpy(outputTextureFileName + cpylen, ".gtx", 5);
-    FILE *outputTextureFile = fopen_or_exit(outputTextureFileName, "wb");
-
-    //GXT FIle Header
-    char    *filename = get_filename(argv);
+    char    *filename = get_filename(input);
     GT2_header_build();
     GT2_metadata_build(textureWidth, textureHeight, bytePerPixel, vitaFourCC, filename);
     fwrite(GT2_header, 1, 0x78, outputTextureFile);
     fwrite(GT2_metadata, 1, 0x58, outputTextureFile);
 
+    uint8_t *textureOutput = (uint8_t *)malloc((textureWidth * textureHeight * bytePerPixel));
+    SwizzleCtrl(textureWidth, textureHeight, bytePerPixel, textureData, textureOutput, 0);
     fwrite(textureOutput, 1, textureWidth * textureHeight * bytePerPixel, outputTextureFile);
     fclose(outputTextureFile);
 }
 
 
-void GTX_to_DDS(char *argv)
+void GTX_to_DDS(char *input, char *output)
 {
-    FILE *GTXfile = fopen_or_exit(argv, "rb");
+    FILE *GTXfile = fopen_or_exit(input, "rb");
     fseek(GTXfile, 0x04, SEEK_SET);
     uint8_t crash[4];
     fread(crash, 4, 1, GTXfile);
@@ -105,19 +95,16 @@ void GTX_to_DDS(char *argv)
     uint32_t textureHeight = ((GTXhead[textureSizeOffset + 7] << 24) | (GTXhead[textureSizeOffset + 6] << 16) | (GTXhead[textureSizeOffset + 5] << 8) | GTXhead[textureSizeOffset + 4]);
 
     float bytePerPixel;
+    char vitaFourCC[4];
+    memcpy(vitaFourCC, (GTXhead + headerMessageSize + 0x28), 4);
     char dwFourCC[4];
-    if       (GTXhead[headerMessageSize + 0x28] == 'U' && GTXhead[headerMessageSize + 0x29] == 'B' && GTXhead[headerMessageSize + 0x2A] == 'C' && GTXhead[headerMessageSize + 0x2B] == '1')
-    {
+    if        (!memcmp(vitaFourCC, "UBC1", 4)){
         bytePerPixel = 0.5;
         memcpy(dwFourCC, "DXT1", 4);
-    }
-    else if (GTXhead[headerMessageSize + 0x28] == 'U' && GTXhead[headerMessageSize + 0x29] == 'B' && GTXhead[headerMessageSize + 0x2A] == 'C' && GTXhead[headerMessageSize + 0x2B] == '3')
-    {
+    } else if (!memcmp(vitaFourCC, "UBC3", 4)){
         bytePerPixel = 1;
         memcpy(dwFourCC, "DXT5", 4);
-    }
-    else
-    {
+    } else {
         printf("Error: Unsupported Texture Format:%c%c%c%c.", GTXhead[0xA0], GTXhead[0xA1], GTXhead[0xA2], GTXhead[0xA3]);
         exit(-1);
     }
@@ -127,19 +114,11 @@ void GTX_to_DDS(char *argv)
     fread(textureData, 1, textureWidth * textureHeight * bytePerPixel, GTXfile);
     fclose(GTXfile);
 
-    uint8_t *textureOutput = (uint8_t *)malloc((textureWidth * textureHeight * bytePerPixel));
-    SwizzleCtrl(textureWidth, textureHeight, bytePerPixel, textureData, textureOutput, 1);
-
-    char outputTextureFileName[0x80];
-    int cpylen = strcspn(argv, ".");
-    memcpy(outputTextureFileName, argv, cpylen);
-    memcpy(outputTextureFileName + cpylen, ".DDS", 5);
-
-    FILE *outputTextureFile = fopen_or_exit(outputTextureFileName, "wb");
-
+    FILE *outputTextureFile = fopen_or_exit(output, "wb");
     DDS_header_build(textureWidth, textureHeight, dwFourCC);
     fwrite(DDS_header, 1, 0x80, outputTextureFile);
-
+    uint8_t *textureOutput = (uint8_t *)malloc((textureWidth * textureHeight * bytePerPixel));
+    SwizzleCtrl(textureWidth, textureHeight, bytePerPixel, textureData, textureOutput, 1);
     fwrite(textureOutput, 1, textureWidth * textureHeight * bytePerPixel, outputTextureFile);
     fclose(outputTextureFile);
 }
@@ -148,9 +127,8 @@ void GTX_to_DDS(char *argv)
 int main(int argc, char *argv[])
 {
     fputs("GT2 Texture Converter Programmed by lipsum, nebulas and Xiyan\n", stderr);
-    if (argc != 2)
-    {
-        fprintf(stderr, "Usage: GT2TextureConverter <filename.dds/filename.gtx>\n");
+    if (argc != 3){
+        fprintf(stderr, "Usage: GT2TextureConverter input output\n");
         exit(-1);
     }
 
@@ -162,9 +140,9 @@ int main(int argc, char *argv[])
     uint32_t magicNumber = (magic[0] << 24) | (magic[1] << 16) | (magic[2] << 8) | magic[3];
 
     if (magicNumber == 0x47545801)
-        GTX_to_DDS(argv[1]);
+        GTX_to_DDS(argv[1], argv[2]);
     else if (magicNumber == 0x44445320)
-        DDS_to_GTX(argv[1]);
+        DDS_to_GTX(argv[1], argv[2]);
     else
         printf("Error: Unsupported file format. Please chack your file.");
 

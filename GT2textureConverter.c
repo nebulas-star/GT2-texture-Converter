@@ -1,150 +1,114 @@
-#include <errno.h>
-#include <stdio.h>
+// SPDX-FileCopyrightText: 2026 Nebulas Astra <https://github.com/nebulas-star>
+// SPDX-License-Identifier: MIT
+
 #include <stdlib.h>
-#include <string.h>
+#include <stdbool.h>
 #include <stdint.h>
 
-#include "GT2textureConverter.h"
+#define STB_IMAGE_IMPLEMENTATION
+//#define STBI_ONLY_PNG
+#include "lib/stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STBIW_WINDOWS_UTF8
+#include "lib/stb_image_write.h"
 
-FILE *fopen_or_exit(const char *filename, const char *mode)
-{
-    FILE *ret = fopen(filename, mode);
+#include "dxt_compress.h"
+#include "gt2_convert.h"
 
-    if (ret == NULL)
-    {
-        int err = errno;
-        fprintf(stderr, "Failed to open file [%s].\nError: [%d]%s\n", filename, err, strerror(err));
-        exit(err);
-    }
+void png_to_gt2(char *input_dir, char *output_dir){
+    int image_x, image_y, image_channels;
+    uint8_t *image_data = stbi_load(input_dir, &image_x, &image_y, &image_channels, 0);
 
-    return ret;
-}
-
-void fwrite32LE(uint32_t FourChar, FILE *out_file)
-{
-    uint8_t SingleChar[4];
-    SingleChar[0] = (FourChar >> 0) & 0xFF;
-    SingleChar[1] = (FourChar >> 8) & 0xFF;
-    SingleChar[2] = (FourChar >> 16) & 0xFF;
-    SingleChar[3] = (FourChar >> 24) & 0xFF;
-    fwrite(SingleChar, 1, 4, out_file);
-}
-
-void DDS_to_GTX(char *input, char *output)
-{
-    FILE *DDSfile = fopen_or_exit(input, "rb");
-    uint32_t headerSize = 0x80;
-    uint8_t DDShead[0x80];
-    fread(DDShead, 1, headerSize, DDSfile);
-
-    uint32_t textureWidth = ((DDShead[0x13] << 24) | (DDShead[0x12] << 16) | (DDShead[0x11] << 8) | DDShead[0x10]);
-    uint32_t textureHeight = ((DDShead[0x0F] << 24) | (DDShead[0x0E] << 16) | (DDShead[0x0D] << 8) | DDShead[0x0C]);
-
-    float bytePerPixel;
-    char dwFourCC[4];
-    memcpy(dwFourCC, (DDShead + 0x54), 4);
+    bool have_alpha;
+    float byte_per_pixel;
     char vitaFourCC[4];
-    if        (!memcmp(dwFourCC, "DXT1", 4)){
-        bytePerPixel = 0.5;
-        memcpy(vitaFourCC, "UBC1", 4);
-    } else if (!memcmp(dwFourCC, "DXT5", 4)){
-        bytePerPixel = 1;
+    if (image_channels == 4){
+        have_alpha = 1;
+        byte_per_pixel = 1;
         memcpy(vitaFourCC, "UBC3", 4);
-    } else {
-        printf("Error: Unsupported DDS Texture Format:%c%c%c%c.", DDShead[0x54], DDShead[0x55], DDShead[0x56], DDShead[0x57]);
-        exit(-1);
     }
+    else if (image_channels == 3){
+        have_alpha = 0;
+        byte_per_pixel = 0.5;
+        memcpy(vitaFourCC, "UBC1", 4);
+    }
+    else {
+        printf("[Warning] Input image isn't a color image.");
+        image_data = stbi_load(input_dir, &image_x, &image_y, &image_channels, 3);
+        have_alpha = 0;
+        byte_per_pixel = 0.5;
+        memcpy(vitaFourCC, "UBC1", 4);
+    }
+    
+    int dxt_size = get_dxt_buffer_size(image_x, image_y, have_alpha);
+    uint8_t *dxt_data = (uint8_t *)malloc(dxt_size);
+    rgba_to_dxt(image_data, image_x, image_y, have_alpha, dxt_data);
+    stbi_image_free(image_data);
 
-    uint8_t *textureData = (uint8_t *)malloc((textureWidth * textureHeight * bytePerPixel));
-    fseek(DDSfile, headerSize, SEEK_SET);
-    fread(textureData, 1, textureWidth * textureHeight * bytePerPixel, DDSfile);
-    fclose(DDSfile);
+    char    *filename = get_filename(input_dir);
+    gt2_header_build();
+    gt2_metadata_build(image_x, image_y, byte_per_pixel, vitaFourCC, filename);
+    uint8_t *gxt_data = (uint8_t *)malloc(image_x * image_y * byte_per_pixel);
+    texture_swizzle(image_x, image_y, byte_per_pixel, dxt_data, gxt_data, 0);
+    free(dxt_data);
 
-    FILE *outputTextureFile = fopen_or_exit(output, "wb");
-
-    char    *filename = get_filename(input);
-    GT2_header_build();
-    GT2_metadata_build(textureWidth, textureHeight, bytePerPixel, vitaFourCC, filename);
-    fwrite(GT2_header, 1, 0x78, outputTextureFile);
-    fwrite(GT2_metadata, 1, 0x58, outputTextureFile);
-
-    uint8_t *textureOutput = (uint8_t *)malloc((textureWidth * textureHeight * bytePerPixel));
-    SwizzleCtrl(textureWidth, textureHeight, bytePerPixel, textureData, textureOutput, 0);
-    fwrite(textureOutput, 1, textureWidth * textureHeight * bytePerPixel, outputTextureFile);
-    fclose(outputTextureFile);
+    FILE *output_file = fopen(output_dir, "wb");
+    fwrite(gt2_header, 1, 0x78, output_file);
+    fwrite(gt2_metadata, 1, 0x58, output_file);
+    fwrite(gxt_data, 1, image_x * image_y * byte_per_pixel, output_file);
+    fclose(output_file);
+    free(gxt_data);
 }
 
-
-void GTX_to_DDS(char *input, char *output)
-{
-    FILE *GTXfile = fopen_or_exit(input, "rb");
-    fseek(GTXfile, 0x04, SEEK_SET);
-    uint8_t crash[4];
-    fread(crash, 4, 1, GTXfile);
-    uint32_t headerMessageSize = ((crash[3] << 24) | (crash[2] << 16) | (crash[1] << 8) | crash[0]);
-    fseek(GTXfile, headerMessageSize + 0x44, SEEK_SET);
-    fread(crash, 4, 1, GTXfile);
-    uint32_t filenamePaddingLegnth = ((crash[3] << 24) | (crash[2] << 16) | (crash[1] << 8) | crash[0]);
-    uint32_t headerSize = headerMessageSize + 0x44 + filenamePaddingLegnth;
-    fseek(GTXfile, 0, SEEK_SET);
-    uint8_t GTXhead[0x200];
-    fread(GTXhead, 1, headerSize, GTXfile);
-
-    uint32_t textureSizeOffset = headerMessageSize + 0x18;
-    uint32_t textureWidth  = ((GTXhead[textureSizeOffset + 3] << 24) | (GTXhead[textureSizeOffset + 2] << 16) | (GTXhead[textureSizeOffset + 1] << 8) | GTXhead[textureSizeOffset + 0]);
-    uint32_t textureHeight = ((GTXhead[textureSizeOffset + 7] << 24) | (GTXhead[textureSizeOffset + 6] << 16) | (GTXhead[textureSizeOffset + 5] << 8) | GTXhead[textureSizeOffset + 4]);
-
-    float bytePerPixel;
+void gt2_to_png(char *input_dir, char *output_dir){
+    int image_x;
+    int image_y;
     char vitaFourCC[4];
-    memcpy(vitaFourCC, (GTXhead + headerMessageSize + 0x28), 4);
-    char dwFourCC[4];
-    if        (!memcmp(vitaFourCC, "UBC1", 4)){
-        bytePerPixel = 0.5;
-        memcpy(dwFourCC, "DXT1", 4);
-    } else if (!memcmp(vitaFourCC, "UBC3", 4)){
-        bytePerPixel = 1;
-        memcpy(dwFourCC, "DXT5", 4);
-    } else {
-        printf("Error: Unsupported Texture Format:%c%c%c%c.", GTXhead[0xA0], GTXhead[0xA1], GTXhead[0xA2], GTXhead[0xA3]);
+    uint8_t *gxt_data = gt2_load(input_dir, &image_x, &image_y, vitaFourCC);
+
+    int image_channels;
+    float byte_per_pixel;
+    if (!memcmp(vitaFourCC, "UBC1", 4)){
+        byte_per_pixel = 0.5;
+        image_channels = 3;
+    } 
+    else if (!memcmp(vitaFourCC, "UBC3", 4)){
+        byte_per_pixel = 1;
+        image_channels = 4;
+    }
+    else {
+        printf("[Error] Unsupported Texture Format:%c%c%c%c.", vitaFourCC[0], vitaFourCC[1], vitaFourCC[2], vitaFourCC[3]);
         exit(-1);
     }
 
-    uint8_t *textureData = (uint8_t *)malloc((textureWidth * textureHeight * bytePerPixel));
-    fseek(GTXfile, headerSize, SEEK_SET);
-    fread(textureData, 1, textureWidth * textureHeight * bytePerPixel, GTXfile);
-    fclose(GTXfile);
-
-    FILE *outputTextureFile = fopen_or_exit(output, "wb");
-    DDS_header_build(textureWidth, textureHeight, dwFourCC);
-    fwrite(DDS_header, 1, 0x80, outputTextureFile);
-    uint8_t *textureOutput = (uint8_t *)malloc((textureWidth * textureHeight * bytePerPixel));
-    SwizzleCtrl(textureWidth, textureHeight, bytePerPixel, textureData, textureOutput, 1);
-    fwrite(textureOutput, 1, textureWidth * textureHeight * bytePerPixel, outputTextureFile);
-    fclose(outputTextureFile);
+    uint8_t *dxt_data = (uint8_t *)malloc(image_x * image_y * byte_per_pixel);
+    texture_swizzle(image_x, image_y, byte_per_pixel, gxt_data, dxt_data, 1);
+    uint8_t *rgba_data = dxt_to_rgba(dxt_data, image_x, image_y, image_channels);
+    stbi_write_png(output_dir, image_x, image_y, 4, rgba_data, 0);
 }
 
+uint8_t gt2_magic[4] = {'G', 'T', 'X', 0x01};
+uint8_t png_magic[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
 
-int main(int argc, char *argv[])
-{
-    fputs("GT2 Texture Converter Programmed by lipsum, nebulas and Xiyan\n", stderr);
+
+int main(int argc, char* argv[]){
+
     if (argc != 3){
-        fprintf(stderr, "Usage: GT2TextureConverter input output\n");
+        printf("Usage: GT2TextureConverter input output");
         exit(-1);
     }
 
-    FILE *inputFile = fopen_or_exit(argv[1], "rb");
+    FILE *input = fopen(argv[1], "rb");
+    uint8_t magic[8];
+    fread(magic, 1, 8, input);
+    fclose(input);
 
-    char magic[4];
-    fread(magic, 4, 1, inputFile);
-    fclose(inputFile);
-    uint32_t magicNumber = (magic[0] << 24) | (magic[1] << 16) | (magic[2] << 8) | magic[3];
-
-    if (magicNumber == 0x47545801)
-        GTX_to_DDS(argv[1], argv[2]);
-    else if (magicNumber == 0x44445320)
-        DDS_to_GTX(argv[1], argv[2]);
+    if      (!memcmp(magic, gt2_magic, 4))
+        gt2_to_png(argv[1], argv[2]);
+    else if (!memcmp(magic, png_magic, 8))
+        png_to_gt2(argv[1], argv[2]);
     else
-        printf("Error: Unsupported file format. Please chack your file.");
+        printf("[ERROR] Unsupported file format.");
 
     return 0;
 }

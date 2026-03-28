@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Nebulas Astra <https://github.com/nebulas-star>
 // SPDX-License-Identifier: MIT
 
+#define  __RELEASE__
+
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -34,12 +36,13 @@ void png_to_gt2(char *input_dir, char *output_dir){
     }
     else {
         printf("[Warning] Input image isn't a color image.");
-        image_data = stbi_load(input_dir, &image_x, &image_y, &image_channels, 3);
         have_alpha = 0;
         byte_per_pixel = 0.5;
         memcpy(vitaFourCC, "UBC1", 4);
     }
-    
+
+    image_data = stbi_load(input_dir, &image_x, &image_y, &image_channels, 4);
+
     int dxt_size = get_dxt_buffer_size(image_x, image_y, have_alpha);
     uint8_t *dxt_data = (uint8_t *)malloc(dxt_size);
     rgba_to_dxt(image_data, image_x, image_y, have_alpha, dxt_data);
@@ -84,19 +87,25 @@ void gt2_to_png(char *input_dir, char *output_dir){
     uint8_t *dxt_data = (uint8_t *)malloc(image_x * image_y * byte_per_pixel);
     texture_swizzle(image_x, image_y, byte_per_pixel, gxt_data, dxt_data, 1);
     uint8_t *rgba_data = dxt_to_rgba(dxt_data, image_x, image_y, image_channels);
-    stbi_write_png(output_dir, image_x, image_y, 4, rgba_data, 0);
+    stbi_write_png(output_dir, image_x, image_y, image_channels, rgba_data, 0);
 }
 
 uint8_t gt2_magic[4] = {'G', 'T', 'X', 0x01};
 uint8_t png_magic[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
 
 
+#ifdef  __RELEASE__
 int main(int argc, char* argv[]){
 
     if (argc != 3){
         printf("Usage: GT2TextureConverter input output");
         exit(-1);
     }
+#else
+int main (void)
+{
+    char *argv[3] = {0, "input.png", "output.gtx"};
+#endif
 
     FILE *input = fopen(argv[1], "rb");
     uint8_t magic[8];

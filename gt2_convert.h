@@ -12,7 +12,7 @@
 #include "vita_swizzle.h"
 
 #ifndef BUILDER 
-#define BUILDER " gt2 Texture File for VITA/Compatible/Build: gt2textureConverter "
+#define BUILDER " GT2 Texture File for VITA/Compatible/Build: GT2textureConverter "
 #endif
 
 uint64_t fsize(FILE *fp){

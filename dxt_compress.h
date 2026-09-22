@@ -348,8 +348,14 @@ uint8_t* dxt_to_rgba(const uint8_t *dxt_data, int image_x, int image_y, int imag
     
     // 转换为目标格式
     if (image_channels == 4) {
-        // RGBA格式，直接复制
-        memcpy(output, temp_buffer, output_size);
+        // RGBA格式，按 R,G,B,A 顺序逐字节写出
+        for (int i = 0; i < image_x * image_y; i++) {
+            uint32_t rgba = temp_buffer[i];
+            output[i * 4 + 0] = (uint8_t)((rgba >> 24) & 0xFF);  // R
+            output[i * 4 + 1] = (uint8_t)((rgba >> 16) & 0xFF);  // G
+            output[i * 4 + 2] = (uint8_t)((rgba >> 8) & 0xFF);   // B
+            output[i * 4 + 3] = (uint8_t)(rgba & 0xFF);          // A
+        }
     } else {
         // RGB格式，去掉alpha通道
         for (int i = 0; i < image_x * image_y; i++) {
